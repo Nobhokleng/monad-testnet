@@ -1,13 +1,19 @@
-require('dotenv').config();
 const ethers = require('ethers');
 const colors = require('colors');
 const displayHeader = require('../src/displayHeader.js');
 const readline = require('readline');
 const axios = require('axios');
 const fs = require('fs');
+const {
+  Worker,
+  isMainThread,
+  parentPort,
+  workerData,
+} = require('worker_threads');
 
 displayHeader();
 
+// Konfigurasi tetap (bukan dari .env)
 const RPC_URL = 'https://testnet-rpc.monad.xyz/';
 const EXPLORER_URL = 'https://testnet.monadexplorer.com/tx/';
 const contractAddress = '0xb2f82D0f38dc453D596Ad40A37799446Cc89274A';
@@ -59,34 +65,28 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function stakeMON(wallet, provider, cycleNumber) {
   try {
     console.log(`\n[Cycle ${cycleNumber}] Preparing to stake MON...`.magenta);
-
     const stakeAmount = getRandomAmount();
     console.log(
       `Random stake amount: ${ethers.utils.formatEther(stakeAmount)} MON`
     );
-
     const data =
       '0x6e553f65' +
       ethers.utils.hexZeroPad(stakeAmount.toHexString(), 32).slice(2) +
       ethers.utils.hexZeroPad(wallet.address, 32).slice(2);
-
     const tx = {
       to: contractAddress,
       data: data,
       gasLimit: ethers.utils.hexlify(gasLimitStake),
       value: stakeAmount,
     };
-
     console.log('🔄 Sending stake transaction...');
     const txResponse = await wallet.sendTransaction(tx);
     console.log(
       `➡️  Transaction sent: ${EXPLORER_URL}${txResponse.hash}`.yellow
     );
-
     console.log('Waiting for transaction confirmation...');
     const receipt = await txResponse.wait();
     console.log(`✔️  Stake successful!`.green.underline);
-
     return { receipt, stakeAmount };
   } catch (error) {
     console.error('❌ Staking failed:'.red, error.message);
@@ -109,30 +109,25 @@ async function requestUnstakeAprMON(
         amountToUnstake
       )} aprMON`
     );
-
     const data =
       '0x7d41c86e' +
       ethers.utils.hexZeroPad(amountToUnstake.toHexString(), 32).slice(2) +
       ethers.utils.hexZeroPad(wallet.address, 32).slice(2) +
       ethers.utils.hexZeroPad(wallet.address, 32).slice(2);
-
     const tx = {
       to: contractAddress,
       data: data,
       gasLimit: ethers.utils.hexlify(gasLimitUnstake),
       value: ethers.utils.parseEther('0'),
     };
-
     console.log('🔄 Sending unstake request transaction...');
     const txResponse = await wallet.sendTransaction(tx);
     console.log(
       `➡️  Transaction sent: ${EXPLORER_URL}${txResponse.hash}`.yellow
     );
-
     console.log('🔄 Waiting for transaction confirmation...');
     const receipt = await txResponse.wait();
     console.log(`✔️  Unstake request successful!`.green.underline);
-
     return receipt;
   } catch (error) {
     console.error('❌ Unstake request failed:'.red, error.message);
@@ -144,11 +139,9 @@ async function checkClaimableStatus(walletAddress) {
   try {
     const apiUrl = `https://liquid-staking-backend-prod-b332fbe9ccfe.herokuapp.com/withdrawal_requests?address=${walletAddress}`;
     const response = await axios.get(apiUrl);
-
     const claimableRequest = response.data.find(
       (request) => !request.claimed && request.is_claimable
     );
-
     if (claimableRequest) {
       console.log(`Found claimable request ID: ${claimableRequest.id}`);
       return {
@@ -175,16 +168,12 @@ async function checkClaimableStatus(walletAddress) {
 async function claimMON(wallet, provider, cycleNumber) {
   try {
     console.log(`\n[Cycle ${cycleNumber}] Checking claimable withdrawals...`);
-
     const { id, isClaimable } = await checkClaimableStatus(wallet.address);
-
     if (!isClaimable || !id) {
       console.log('No claimable withdrawals found at this time');
       return null;
     }
-
     console.log(`Preparing to claim withdrawal request ID: ${id}`);
-
     const data =
       '0x492e47d2' +
       '0000000000000000000000000000000000000000000000000000000000000040' +
@@ -193,22 +182,18 @@ async function claimMON(wallet, provider, cycleNumber) {
       ethers.utils
         .hexZeroPad(ethers.BigNumber.from(id).toHexString(), 32)
         .slice(2);
-
     const tx = {
       to: contractAddress,
       data: data,
       gasLimit: ethers.utils.hexlify(gasLimitClaim),
       value: ethers.utils.parseEther('0'),
     };
-
     console.log('Sending claim transaction...');
     const txResponse = await wallet.sendTransaction(tx);
     console.log(`Transaction sent: ${EXPLORER_URL}${txResponse.hash}`);
-
     console.log('Waiting for transaction confirmation...');
     const receipt = await txResponse.wait();
     console.log(`Claim successful for request ID: ${id}`.green.underline);
-
     return receipt;
   } catch (error) {
     console.error('Claim failed:', error.message);
@@ -219,9 +204,7 @@ async function claimMON(wallet, provider, cycleNumber) {
 async function runCycle(wallet, provider, cycleNumber) {
   try {
     console.log(`\n=== Starting Cycle ${cycleNumber} ===`);
-
     const { stakeAmount } = await stakeMON(wallet, provider, cycleNumber);
-
     const delayTimeBeforeUnstake = getRandomDelay();
     console.log(
       `🔄 Waiting for ${
@@ -229,17 +212,13 @@ async function runCycle(wallet, provider, cycleNumber) {
       } seconds before requesting unstake...`
     );
     await delay(delayTimeBeforeUnstake);
-
     await requestUnstakeAprMON(wallet, provider, stakeAmount, cycleNumber);
-
     console.log(
       `Waiting for 660 seconds (11 minutes) before checking claim status...`
         .magenta
     );
     await delay(660000);
-
     await claimMON(wallet, provider, cycleNumber);
-
     console.log(
       `=== Cycle ${cycleNumber} completed successfully! ===`.magenta.bold
     );
@@ -263,63 +242,89 @@ function getCycleCount() {
   });
 }
 
-async function main() {
-  try {
-    console.log('Starting aPriori Staking operations...'.green);
+if (isMainThread) {
+  // Main thread logic
+  async function main() {
+    try {
+      console.log('Starting aPriori Staking operations...'.green);
+      const cycleCount = await getCycleCount();
+      console.log(`Running ${cycleCount} cycles...`.yellow);
 
-    const cycleCount = await getCycleCount();
-    console.log(`Running ${cycleCount} cycles...`.yellow);
+      const workers = [];
+      for (let i = 0; i < wallets.length; i++) {
+        const privateKey = wallets[i].trim();
+        const proxy = proxies[i % proxies.length].trim();
 
-    for (let i = 0; i < wallets.length; i++) {
-      const privateKey = wallets[i].trim();
-      const proxy = proxies[i % proxies.length].trim();
+        // Create a worker for each account
+        const worker = new Worker(__filename, {
+          workerData: { privateKey, proxy, cycleCount },
+        });
 
-      const provider = new ethers.providers.JsonRpcProvider({
-        url: RPC_URL,
-        headers: {
-          'Proxy-Authorization': `Basic ${Buffer.from(
-            proxy.split('@')[0]
-          ).toString('base64')}`,
-        },
-      });
+        workers.push(worker);
 
-      const wallet = new ethers.Wallet(privateKey, provider);
+        worker.on('message', (message) => {
+          console.log(message);
+        });
 
+        worker.on('error', (error) => {
+          console.error(`Worker error: ${error.message}`.red);
+        });
+
+        worker.on('exit', (code) => {
+          if (code !== 0) {
+            console.error(`Worker stopped with exit code ${code}`.red);
+          }
+        });
+      }
+
+      // Wait for all workers to finish
+      await Promise.all(workers.map((worker) => worker.terminate()));
       console.log(
-        `\nStarting operations for account ${wallet.address} using proxy ${proxy}`
-          .cyan
+        `\nAll ${cycleCount} cycles completed successfully for all accounts!`
+          .green.bold
       );
+    } catch (error) {
+      console.error('Operation failed:'.red, error.message);
+    } finally {
+      rl.close();
+    }
+  }
 
-      for (let j = 1; j <= cycleCount; j++) {
-        await runCycle(wallet, provider, j);
+  main();
+} else {
+  // Worker thread logic
+  const { privateKey, proxy, cycleCount } = workerData;
 
-        if (j < cycleCount) {
-          const interCycleDelay = getRandomDelay();
-          console.log(
-            `\nWaiting ${interCycleDelay / 1000} seconds before next cycle...`
-          );
-          await delay(interCycleDelay);
-        }
+  const provider = new ethers.providers.JsonRpcProvider({
+    url: RPC_URL,
+    headers: {
+      'Proxy-Authorization': `Basic ${Buffer.from(proxy.split('@')[0]).toString(
+        'base64'
+      )}`,
+    },
+  });
+
+  const wallet = new ethers.Wallet(privateKey, provider);
+
+  parentPort.postMessage(
+    `\nStarting operations for account ${wallet.address} using proxy ${proxy}`
+      .cyan
+  );
+
+  (async () => {
+    for (let j = 1; j <= cycleCount; j++) {
+      await runCycle(wallet, provider, j);
+      if (j < cycleCount) {
+        const interCycleDelay = getRandomDelay();
+        parentPort.postMessage(
+          `\nWaiting ${interCycleDelay / 1000} seconds before next cycle...`
+        );
+        await delay(interCycleDelay);
       }
     }
-
-    console.log(
-      `\nAll ${cycleCount} cycles completed successfully for all accounts!`
+    parentPort.postMessage(
+      `\nAll ${cycleCount} cycles completed successfully for account ${wallet.address}!`
         .green.bold
     );
-  } catch (error) {
-    console.error('Operation failed:'.red, error.message);
-  } finally {
-    rl.close();
-  }
+  })();
 }
-
-main();
-
-module.exports = {
-  stakeMON,
-  requestUnstakeAprMON,
-  claimMON,
-  getRandomAmount,
-  getRandomDelay,
-};

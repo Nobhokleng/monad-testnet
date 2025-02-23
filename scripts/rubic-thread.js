@@ -1,8 +1,8 @@
-require('dotenv').config();
 const { ethers } = require('ethers');
 const colors = require('colors');
-const readline = require('readline');
 const fs = require('fs');
+const readline = require('readline');
+const { Worker, isMainThread, parentPort } = require('worker_threads');
 const displayHeader = require('../src/displayHeader.js');
 displayHeader();
 
@@ -27,6 +27,7 @@ if (wallets.length === 0 || proxies.length === 0) {
   process.exit(1);
 }
 
+// Fungsi untuk mendapatkan jumlah MON acak antara 0.01 hingga 0.05
 function getRandomAmount() {
   const min = 0.01;
   const max = 0.05;
@@ -34,12 +35,14 @@ function getRandomAmount() {
   return ethers.utils.parseEther(randomAmount.toFixed(4));
 }
 
+// Fungsi untuk mendapatkan delay acak antara 1 hingga 3 menit (dalam milidetik)
 function getRandomDelay() {
-  const minDelay = 1 * 60 * 1000;
-  const maxDelay = 3 * 60 * 1000;
+  const minDelay = 1 * 60 * 1000; // 1 minute in milliseconds
+  const maxDelay = 3 * 60 * 1000; // 3 minutes in milliseconds
   return Math.floor(Math.random() * (maxDelay - minDelay + 1) + minDelay);
 }
 
+// Fungsi untuk wrap MON menjadi WMON
 async function wrapMON(wallet, amount) {
   try {
     console.log(
@@ -62,6 +65,7 @@ async function wrapMON(wallet, amount) {
   }
 }
 
+// Fungsi untuk unwrap WMON menjadi MON
 async function unwrapMON(wallet, amount) {
   try {
     console.log(
@@ -85,6 +89,7 @@ async function unwrapMON(wallet, amount) {
   }
 }
 
+// Fungsi untuk menjalankan swap cycle
 async function runSwapCycle(wallet, cycles, interval) {
   let cycleCount = 0;
 
@@ -104,7 +109,7 @@ async function runSwapCycle(wallet, cycles, interval) {
         clearInterval(intervalId);
         console.log(`All ${cycles} cycles completed`.green);
       }
-    }, interval * 60 * 60 * 1000);
+    }, interval * 60 * 60 * 1000); // Interval in hours converted to milliseconds
   } else {
     for (let i = 0; i < cycles; i++) {
       const randomAmount = getRandomAmount();
@@ -122,61 +127,89 @@ async function runSwapCycle(wallet, cycles, interval) {
   }
 }
 
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-});
+if (isMainThread) {
+  // Main thread: Membuat worker untuk setiap akun
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
 
-rl.question(
-  'How many swap cycles would you like to run? (Press enter to skip): ',
-  (cycles) => {
-    rl.question(
-      'How often (in hours) would you like the cycle to run? (Press enter to skip): ',
-      (hours) => {
-        let cyclesCount = cycles ? parseInt(cycles) : 1;
-        let intervalHours = hours ? parseInt(hours) : null;
+  rl.question(
+    'How many swap cycles would you like to run? (Press enter to skip): ',
+    (cycles) => {
+      rl.question(
+        'How often (in hours) would you like the cycle to run? (Press enter to skip): ',
+        (hours) => {
+          let cyclesCount = cycles ? parseInt(cycles) : 1;
+          let intervalHours = hours ? parseInt(hours) : null;
 
-        if (
-          isNaN(cyclesCount) ||
-          (intervalHours !== null && isNaN(intervalHours))
-        ) {
-          console.log('❌ Invalid input. Please enter valid numbers.'.red);
-          rl.close();
-          return;
-        }
-
-        console.log(
-          `Starting ${cyclesCount} swap cycles ${
-            intervalHours ? `every ${intervalHours} hour(s)` : 'immediately'
-          }...`
-        );
-
-        // Jalankan swap cycle untuk setiap akun
-        for (let i = 0; i < wallets.length; i++) {
-          const privateKey = wallets[i].trim();
-          const proxy = proxies[i % proxies.length].trim();
-
-          const provider = new ethers.providers.JsonRpcProvider({
-            url: RPC_URL,
-            headers: {
-              'Proxy-Authorization': `Basic ${Buffer.from(
-                proxy.split('@')[0]
-              ).toString('base64')}`,
-            },
-          });
-
-          const wallet = new ethers.Wallet(privateKey, provider);
+          if (
+            isNaN(cyclesCount) ||
+            (intervalHours !== null && isNaN(intervalHours))
+          ) {
+            console.log('❌ Invalid input. Please enter valid numbers.'.red);
+            rl.close();
+            return;
+          }
 
           console.log(
-            `\nStarting operations for account ${wallet.address} using proxy ${proxy}`
-              .cyan
+            `Starting ${cyclesCount} swap cycles ${
+              intervalHours ? `every ${intervalHours} hour(s)` : 'immediately'
+            }...`
           );
 
-          runSwapCycle(wallet, cyclesCount, intervalHours);
-        }
+          // Membuat worker untuk setiap akun
+          wallets.forEach((privateKey, index) => {
+            const proxy = proxies[index % proxies.length].trim();
+            const worker = new Worker(__filename, {
+              workerData: {
+                privateKey,
+                proxy,
+                cyclesCount,
+                intervalHours,
+              },
+            });
 
-        rl.close();
-      }
-    );
-  }
-);
+            worker.on('message', (message) => {
+              console.log(`Worker message: ${message}`);
+            });
+
+            worker.on('error', (error) => {
+              console.error(`Worker error: ${error.message}`);
+            });
+
+            worker.on('exit', (code) => {
+              if (code !== 0) {
+                console.error(`Worker stopped with exit code ${code}`);
+              }
+            });
+          });
+
+          rl.close();
+        }
+      );
+    }
+  );
+} else {
+  // Worker thread: Menjalankan swap cycle untuk akun tertentu
+  const { workerData } = require('worker_threads');
+  const { privateKey, proxy, cyclesCount, intervalHours } = workerData;
+
+  const provider = new ethers.providers.JsonRpcProvider({
+    url: RPC_URL,
+    headers: {
+      'Proxy-Authorization': `Basic ${Buffer.from(proxy.split('@')[0]).toString(
+        'base64'
+      )}`,
+    },
+  });
+
+  const wallet = new ethers.Wallet(privateKey, provider);
+
+  console.log(
+    `\nStarting operations for account ${wallet.address} using proxy ${proxy}`
+      .cyan
+  );
+
+  runSwapCycle(wallet, cyclesCount, intervalHours);
+}
