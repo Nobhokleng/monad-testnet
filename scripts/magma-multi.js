@@ -1,12 +1,18 @@
-require('dotenv').config();
 const ethers = require('ethers');
 const colors = require('colors');
 const fs = require('fs');
 const displayHeader = require('../src/displayHeader.js');
 const readline = require('readline');
+const {
+  Worker,
+  isMainThread,
+  parentPort,
+  workerData,
+} = require('worker_threads');
 
 displayHeader();
 
+// Konfigurasi tetap (bukan dari .env)
 const RPC_URL = 'https://testnet-rpc.monad.xyz/';
 const EXPLORER_URL = 'https://testnet.monadexplorer.com/tx/';
 const contractAddress = '0x2c9C959516e9AAEdB2C748224a41249202ca8BE7';
@@ -53,29 +59,24 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function stakeMON(wallet, cycleNumber) {
   try {
     console.log(`\n[Cycle ${cycleNumber}] Preparing to stake MON...`.magenta);
-
     const stakeAmount = getRandomAmount();
     console.log(
       `Random stake amount: ${ethers.utils.formatEther(stakeAmount)} MON`
     );
-
     const tx = {
       to: contractAddress,
       data: '0xd5575982',
       gasLimit: ethers.utils.hexlify(gasLimitStake),
       value: stakeAmount,
     };
-
     console.log('🔄 Sending stake transaction...');
     const txResponse = await wallet.sendTransaction(tx);
     console.log(
       `➡️  Transaction sent: ${EXPLORER_URL}${txResponse.hash}`.yellow
     );
-
     console.log('🔄 Waiting for transaction confirmation...');
     const receipt = await txResponse.wait();
     console.log(`✔️  Stake successful!`.green.underline);
-
     return { receipt, stakeAmount };
   } catch (error) {
     console.error('❌ Staking failed:'.red, error.message);
@@ -91,30 +92,25 @@ async function unstakeGMON(wallet, amountToUnstake, cycleNumber) {
     console.log(
       `Amount to unstake: ${ethers.utils.formatEther(amountToUnstake)} gMON`
     );
-
     const functionSelector = '0x6fed1ea7';
     const paddedAmount = ethers.utils.hexZeroPad(
       amountToUnstake.toHexString(),
       32
     );
     const data = functionSelector + paddedAmount.slice(2);
-
     const tx = {
       to: contractAddress,
       data: data,
       gasLimit: ethers.utils.hexlify(gasLimitUnstake),
     };
-
     console.log('🔄 Sending unstake transaction...');
     const txResponse = await wallet.sendTransaction(tx);
     console.log(
       `➡️  Transaction sent ${EXPLORER_URL}${txResponse.hash}`.yellow
     );
-
     console.log('🔄 Waiting for transaction confirmation...');
     const receipt = await txResponse.wait();
     console.log(`✔️  Unstake successful!`.green.underline);
-
     return receipt;
   } catch (error) {
     console.error('❌ Unstaking failed:'.red, error.message);
@@ -126,15 +122,11 @@ async function unstakeGMON(wallet, amountToUnstake, cycleNumber) {
 async function runCycle(wallet, cycleNumber) {
   try {
     console.log(`\n=== Starting Cycle ${cycleNumber} ===`.magenta.bold);
-
     const { stakeAmount } = await stakeMON(wallet, cycleNumber);
-
     const delayTime = getRandomDelay();
     console.log(`Waiting for ${delayTime / 1000} seconds before unstaking...`);
     await delay(delayTime);
-
     await unstakeGMON(wallet, stakeAmount, cycleNumber);
-
     console.log(
       `=== Cycle ${cycleNumber} completed successfully! ===`.magenta.bold
     );
@@ -158,63 +150,89 @@ function getCycleCount() {
   });
 }
 
-async function main() {
-  try {
-    console.log('Starting Magma Staking operations...'.green);
+if (isMainThread) {
+  // Main thread logic
+  async function main() {
+    try {
+      console.log('Starting Magma Staking operations...'.green);
+      const cycleCount = await getCycleCount();
+      console.log(`Running ${cycleCount} cycles...`.yellow);
 
-    const cycleCount = await getCycleCount();
-    console.log(`Running ${cycleCount} cycles...`.yellow);
+      const workers = [];
+      for (let i = 0; i < wallets.length; i++) {
+        const privateKey = wallets[i].trim();
+        const proxy = proxies[i % proxies.length].trim();
 
-    // Jalankan siklus untuk setiap akun
-    for (let i = 0; i < wallets.length; i++) {
-      const privateKey = wallets[i].trim();
-      const proxy = proxies[i % proxies.length].trim();
+        // Create a worker for each account
+        const worker = new Worker(__filename, {
+          workerData: { privateKey, proxy, cycleCount },
+        });
 
-      const provider = new ethers.providers.JsonRpcProvider({
-        url: RPC_URL,
-        headers: {
-          'Proxy-Authorization': `Basic ${Buffer.from(
-            proxy.split('@')[0]
-          ).toString('base64')}`,
-        },
-      });
+        workers.push(worker);
 
-      const wallet = new ethers.Wallet(privateKey, provider);
+        worker.on('message', (message) => {
+          console.log(message);
+        });
 
+        worker.on('error', (error) => {
+          console.error(`Worker error: ${error.message}`.red);
+        });
+
+        worker.on('exit', (code) => {
+          if (code !== 0) {
+            console.error(`Worker stopped with exit code ${code}`.red);
+          }
+        });
+      }
+
+      // Wait for all workers to finish
+      await Promise.all(workers.map((worker) => worker.terminate()));
       console.log(
-        `\nStarting operations for account ${wallet.address} using proxy ${proxy}`
-          .cyan
+        `\nAll ${cycleCount} cycles completed successfully for all accounts!`
+          .green.bold
       );
+    } catch (error) {
+      console.error('Operation failed:'.red, error.message);
+    } finally {
+      rl.close();
+    }
+  }
 
-      for (let j = 1; j <= cycleCount; j++) {
-        await runCycle(wallet, j);
+  main();
+} else {
+  // Worker thread logic
+  const { privateKey, proxy, cycleCount } = workerData;
 
-        if (j < cycleCount) {
-          const interCycleDelay = getRandomDelay();
-          console.log(
-            `\nWaiting ${interCycleDelay / 1000} seconds before next cycle...`
-          );
-          await delay(interCycleDelay);
-        }
+  const provider = new ethers.providers.JsonRpcProvider({
+    url: RPC_URL,
+    headers: {
+      'Proxy-Authorization': `Basic ${Buffer.from(proxy.split('@')[0]).toString(
+        'base64'
+      )}`,
+    },
+  });
+
+  const wallet = new ethers.Wallet(privateKey, provider);
+
+  parentPort.postMessage(
+    `\nStarting operations for account ${wallet.address} using proxy ${proxy}`
+      .cyan
+  );
+
+  (async () => {
+    for (let j = 1; j <= cycleCount; j++) {
+      await runCycle(wallet, j);
+      if (j < cycleCount) {
+        const interCycleDelay = getRandomDelay();
+        parentPort.postMessage(
+          `\nWaiting ${interCycleDelay / 1000} seconds before next cycle...`
+        );
+        await delay(interCycleDelay);
       }
     }
-
-    console.log(
-      `\nAll ${cycleCount} cycles completed successfully for all accounts!`
+    parentPort.postMessage(
+      `\nAll ${cycleCount} cycles completed successfully for account ${wallet.address}!`
         .green.bold
     );
-  } catch (error) {
-    console.error('Operation failed:'.red, error.message);
-  } finally {
-    rl.close();
-  }
+  })();
 }
-
-main();
-
-module.exports = {
-  stakeMON,
-  unstakeGMON,
-  getRandomAmount,
-  getRandomDelay,
-};
