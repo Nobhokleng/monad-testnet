@@ -10,8 +10,8 @@ displayHeader();
 const RPC_URL = 'https://testnet-rpc.monad.xyz/';
 const EXPLORER_URL = 'https://testnet.monadexplorer.com/tx/';
 const contractAddress = '0x2c9C959516e9AAEdB2C748224a41249202ca8BE7';
-const gasLimitStake = 500000;
-const gasLimitUnstake = 800000;
+const gasLimitStake = 100000;
+const gasLimitUnstake = 160000;
 
 // Membaca daftar private key dari file wallet.txt
 const wallets = fs
@@ -36,15 +36,15 @@ const rl = readline.createInterface({
 });
 
 function getRandomAmount() {
-  const min = 0.01;
-  const max = 0.05;
+  const min = 0.015;
+  const max = 0.085;
   const randomAmount = Math.random() * (max - min) + min;
   return ethers.utils.parseEther(randomAmount.toFixed(4));
 }
 
 function getRandomDelay() {
-  const minDelay = 1 * 60 * 1000;
-  const maxDelay = 3 * 60 * 1000;
+  const minDelay = 0.30 * 60 * 1000;
+  const maxDelay = 1.15 * 60 * 1000;
   return Math.floor(Math.random() * (maxDelay - minDelay + 1) + minDelay);
 }
 

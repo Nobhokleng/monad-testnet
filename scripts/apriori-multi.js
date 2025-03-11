@@ -11,9 +11,9 @@ displayHeader();
 const RPC_URL = 'https://testnet-rpc.monad.xyz/';
 const EXPLORER_URL = 'https://testnet.monadexplorer.com/tx/';
 const contractAddress = '0xb2f82D0f38dc453D596Ad40A37799446Cc89274A';
-const gasLimitStake = 500000;
-const gasLimitUnstake = 800000;
-const gasLimitClaim = 800000;
+const gasLimitStake = 100000;
+const gasLimitUnstake = 160000;
+const gasLimitClaim = 160000;
 
 const minimalABI = [
   'function getPendingUnstakeRequests(address) view returns (uint256[] memory)',
@@ -42,15 +42,15 @@ if (wallets.length === 0 || proxies.length === 0) {
 }
 
 function getRandomAmount() {
-  const min = 0.01;
-  const max = 0.05;
+  const min = 0.015;
+  const max = 0.085;
   const randomAmount = Math.random() * (max - min) + min;
   return ethers.utils.parseEther(randomAmount.toFixed(4));
 }
 
 function getRandomDelay() {
-  const minDelay = 1 * 60 * 1000;
-  const maxDelay = 3 * 60 * 1000;
+  const minDelay = 0.30 * 60 * 1000;
+  const maxDelay = 1.15 * 60 * 1000;
   return Math.floor(Math.random() * (maxDelay - minDelay + 1) + minDelay);
 }
 
