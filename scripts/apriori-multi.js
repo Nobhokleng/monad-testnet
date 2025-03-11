@@ -223,19 +223,21 @@ async function runCycle(wallet, provider, cycleNumber) {
     const { stakeAmount } = await stakeMON(wallet, provider, cycleNumber);
 
     const delayTimeBeforeUnstake = getRandomDelay();
-    console.log(
-      `🔄 Waiting for ${
-        delayTimeBeforeUnstake / 1000
-      } seconds before requesting unstake...`
-    );
+    console.log(`🔄 Waiting for ${delayTimeBeforeUnstake / 1000} seconds before requesting unstake...`);
     await delay(delayTimeBeforeUnstake);
 
-    await requestUnstakeAprMON(wallet, provider, stakeAmount, cycleNumber);
+    // Generate a random percentage between 7.5% and 15% to leave behind
+    const remainingPercentage = Math.random() * (5 - 2.5) + 2.5;
+    // Convert remaining percentage to a multiplier (i.e., 0.0918 for 9.18%)
+    const multiplier = 1 - (remainingPercentage / 100);
+    const amountToUnstake = stakeAmount.mul(ethers.BigNumber.from(Math.floor(multiplier * 1000000).toString())).div(ethers.BigNumber.from('1000000'));
 
-    console.log(
-      `Waiting for 660 seconds (11 minutes) before checking claim status...`
-        .magenta
-    );
+    console.log(`Amount to unstake: ${ethers.utils.formatEther(amountToUnstake)} gMON`);
+    console.log(`Remaining amount to keep: ${ethers.utils.formatEther(stakeAmount - amountToUnstake)} gMON`);
+
+    await requestUnstakeAprMON(wallet, provider, amountToUnstake, cycleNumber);
+
+    console.log(`Waiting for 660 seconds (11 minutes) before checking claim status...`.magenta);
     await delay(660000);
 
     await claimMON(wallet, provider, cycleNumber);

@@ -133,11 +133,18 @@ async function runCycle(wallet, cycleNumber) {
     console.log(`Waiting for ${delayTime / 1000} seconds before unstaking...`);
     await delay(delayTime);
 
-    await unstakeGMON(wallet, stakeAmount, cycleNumber);
+    // Generate a random percentage between 7.5% and 15% to leave behind
+    const remainingPercentage = Math.random() * (5 - 2.5) + 2.5;
+    // Convert remaining percentage to a multiplier (i.e., 0.0918 for 9.18%)
+    const multiplier = 1 - (remainingPercentage / 100);
+    const amountToUnstake = stakeAmount.mul(ethers.BigNumber.from(Math.floor(multiplier * 1000000).toString())).div(ethers.BigNumber.from('1000000'));
 
-    console.log(
-      `=== Cycle ${cycleNumber} completed successfully! ===`.magenta.bold
-    );
+    console.log(`Amount to unstake: ${ethers.utils.formatEther(amountToUnstake)} gMON`);
+    console.log(`Remaining amount to keep: ${ethers.utils.formatEther(stakeAmount - amountToUnstake)} gMON`);
+
+    await unstakeGMON(wallet, amountToUnstake, cycleNumber);
+
+    console.log(`=== Cycle ${cycleNumber} completed successfully! ===`.magenta.bold);
   } catch (error) {
     console.error(`❌ Cycle ${cycleNumber} failed:`.red, error.message);
     throw error;
