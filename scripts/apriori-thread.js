@@ -17,9 +17,9 @@ displayHeader();
 const RPC_URL = 'https://testnet-rpc.monad.xyz/';
 const EXPLORER_URL = 'https://testnet.monadexplorer.com/tx/';
 const contractAddress = '0xb2f82D0f38dc453D596Ad40A37799446Cc89274A';
-const gasLimitStake = 500000;
-const gasLimitUnstake = 800000;
-const gasLimitClaim = 800000;
+const gasLimitStake = 100000;
+const gasLimitUnstake = 160000;
+const gasLimitClaim = 160000;
 
 const minimalABI = [
   'function getPendingUnstakeRequests(address) view returns (uint256[] memory)',
@@ -48,15 +48,15 @@ if (wallets.length === 0 || proxies.length === 0) {
 }
 
 function getRandomAmount() {
-  const min = 0.01;
-  const max = 0.05;
+  const min = 0.015;
+  const max = 0.085;
   const randomAmount = Math.random() * (max - min) + min;
   return ethers.utils.parseEther(randomAmount.toFixed(4));
 }
 
 function getRandomDelay() {
-  const minDelay = 1 * 60 * 1000;
-  const maxDelay = 3 * 60 * 1000;
+  const minDelay = 0.30 * 60 * 1000;
+  const maxDelay = 1.15 * 60 * 1000;
   return Math.floor(Math.random() * (maxDelay - minDelay + 1) + minDelay);
 }
 
@@ -204,21 +204,29 @@ async function claimMON(wallet, provider, cycleNumber) {
 async function runCycle(wallet, provider, cycleNumber) {
   try {
     console.log(`\n=== Starting Cycle ${cycleNumber} ===`);
+    
     const { stakeAmount } = await stakeMON(wallet, provider, cycleNumber);
+
     const delayTimeBeforeUnstake = getRandomDelay();
-    console.log(
-      `🔄 Waiting for ${
-        delayTimeBeforeUnstake / 1000
-      } seconds before requesting unstake...`
-    );
+    console.log(`🔄 Waiting for ${delayTimeBeforeUnstake / 1000} seconds before requesting unstake...`);
     await delay(delayTimeBeforeUnstake);
-    await requestUnstakeAprMON(wallet, provider, stakeAmount, cycleNumber);
-    console.log(
-      `Waiting for 660 seconds (11 minutes) before checking claim status...`
-        .magenta
-    );
+
+    // Generate a random percentage between 7.5% and 15% to leave behind
+    const remainingPercentage = Math.random() * (5 - 2.5) + 2.5;
+    // Convert remaining percentage to a multiplier (i.e., 0.0918 for 9.18%)
+    const multiplier = 1 - (remainingPercentage / 100);
+    const amountToUnstake = stakeAmount.mul(ethers.BigNumber.from(Math.floor(multiplier * 1000000).toString())).div(ethers.BigNumber.from('1000000'));
+
+    console.log(`Amount to unstake: ${ethers.utils.formatEther(amountToUnstake)} gMON`);
+    console.log(`Remaining amount to keep: ${ethers.utils.formatEther(stakeAmount - amountToUnstake)} gMON`);
+
+    await requestUnstakeAprMON(wallet, provider, amountToUnstake, cycleNumber);
+
+    console.log(`Waiting for 660 seconds (11 minutes) before checking claim status...`.magenta);
     await delay(660000);
+
     await claimMON(wallet, provider, cycleNumber);
+
     console.log(
       `=== Cycle ${cycleNumber} completed successfully! ===`.magenta.bold
     );

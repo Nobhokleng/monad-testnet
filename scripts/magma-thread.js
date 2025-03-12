@@ -16,8 +16,8 @@ displayHeader();
 const RPC_URL = 'https://testnet-rpc.monad.xyz/';
 const EXPLORER_URL = 'https://testnet.monadexplorer.com/tx/';
 const contractAddress = '0x2c9C959516e9AAEdB2C748224a41249202ca8BE7';
-const gasLimitStake = 500000;
-const gasLimitUnstake = 800000;
+const gasLimitStake = 100000;
+const gasLimitUnstake = 160000;
 
 // Membaca daftar private key dari file wallet.txt
 const wallets = fs
@@ -42,15 +42,15 @@ const rl = readline.createInterface({
 });
 
 function getRandomAmount() {
-  const min = 0.01;
-  const max = 0.05;
+  const min = 0.015;
+  const max = 0.085;
   const randomAmount = Math.random() * (max - min) + min;
   return ethers.utils.parseEther(randomAmount.toFixed(4));
 }
 
 function getRandomDelay() {
-  const minDelay = 1 * 60 * 1000;
-  const maxDelay = 3 * 60 * 1000;
+  const minDelay = 0.30 * 60 * 1000;
+  const maxDelay = 1.15 * 60 * 1000;
   return Math.floor(Math.random() * (maxDelay - minDelay + 1) + minDelay);
 }
 
@@ -122,14 +122,25 @@ async function unstakeGMON(wallet, amountToUnstake, cycleNumber) {
 async function runCycle(wallet, cycleNumber) {
   try {
     console.log(`\n=== Starting Cycle ${cycleNumber} ===`.magenta.bold);
+
     const { stakeAmount } = await stakeMON(wallet, cycleNumber);
+
     const delayTime = getRandomDelay();
     console.log(`Waiting for ${delayTime / 1000} seconds before unstaking...`);
     await delay(delayTime);
-    await unstakeGMON(wallet, stakeAmount, cycleNumber);
-    console.log(
-      `=== Cycle ${cycleNumber} completed successfully! ===`.magenta.bold
-    );
+
+    // Generate a random percentage between 7.5% and 15% to leave behind
+    const remainingPercentage = Math.random() * (5 - 2.5) + 2.5;
+    // Convert remaining percentage to a multiplier (i.e., 0.0918 for 9.18%)
+    const multiplier = 1 - (remainingPercentage / 100);
+    const amountToUnstake = stakeAmount.mul(ethers.BigNumber.from(Math.floor(multiplier * 1000000).toString())).div(ethers.BigNumber.from('1000000'));
+
+    console.log(`Amount to unstake: ${ethers.utils.formatEther(amountToUnstake)} gMON`);
+    console.log(`Remaining amount to keep: ${ethers.utils.formatEther(stakeAmount - amountToUnstake)} gMON`);
+
+    await unstakeGMON(wallet, amountToUnstake, cycleNumber);
+
+    console.log(`=== Cycle ${cycleNumber} completed successfully! ===`.magenta.bold);
   } catch (error) {
     console.error(`❌ Cycle ${cycleNumber} failed:`.red, error.message);
     throw error;
