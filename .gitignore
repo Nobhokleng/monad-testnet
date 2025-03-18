@@ -1,3 +1,5 @@
 node_modules
 .env
+proxy.txt
+wallet.txt
 package-lock.json
